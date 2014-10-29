@@ -8,7 +8,7 @@ import textwrap
 
 from .base import (
     BaseReader, BaseWriter, Caption, CaptionSet, CaptionNode,
-) 
+)
 from .exceptions import CaptionReadNoCaptions
 
 
@@ -188,6 +188,7 @@ COMMANDS = {
     u'165e': u'<$>{break}<$>',
     u'15cd': u'<$>{break}<$>',
     u'10cd': u'<$>{break}<$>',
+    u'107a': u'<$>{break}<$>',
     u'9767': u'<$>{break}<$>',
     u'9249': u'<$>{break}<$>',
     u'1349': u'<$>{break}<$>',
@@ -821,32 +822,46 @@ class SCCReader(BaseReader):
         parts = r.findall(line.lower())
 
         self.time = parts[0][0]
-        self.frame_count = 0
+
+        words = parts[0][2].split(u' ')
+        self.frame_count = len(parts)
 
         # loop through each word
-        for word in parts[0][2].split(u' '):
-            # ignore empty results
-            if word.strip() != u'':
-                self._translate_word(word)
+        words = ''.join(words)
+        while len(words) > 0:
+            word = words[:4]
+            words = words[4:]
 
-    def _translate_word(self, word):
-        # count frames for timing
-        self.frame_count += 1
+            # first check if word is a command
+            if word in COMMANDS:
+                self._translate_command(word)
 
-        # first check if word is a command
-        if word in COMMANDS:
-            self._translate_command(word)
+            # second, check if word is a special character
+            elif word in SPECIAL_CHARS:
+                self._translate_special_char(word)
 
-        # second, check if word is a special character
-        elif word in SPECIAL_CHARS:
-            self._translate_special_char(word)
+            elif word in EXTENDED_CHARS:
+                self._translate_extended_char(word)
 
-        elif word in EXTENDED_CHARS:
-            self._translate_extended_char(word)
+            # third, try to convert word into 2 characters
+            else:
+                # check to see if the first byte is a recognized character
+                byte = word[:2]
+                if byte in CHARACTERS:
+                    if self.paint_on:
+                        self.paint_buffer += CHARACTERS[byte]
+                    else:
+                        self.pop_buffer += CHARACTERS[byte]
 
-        # third, try to convert word into 2 characters
-        else:
-            self._translate_characters(word)
+                    byte = word[2:]
+                    if byte in CHARACTERS:
+                        if self.paint_on:
+                            self.paint_buffer += CHARACTERS[byte]
+                        else:
+                            self.pop_buffer += CHARACTERS[byte]
+                    else:
+                        words = byte + words
+
 
     def _handle_double_command(self, word):
         # ensure we don't accidentally use the same command twice
@@ -956,21 +971,6 @@ class SCCReader(BaseReader):
                 self.paint_buffer += COMMANDS[word]
             else:
                 self.pop_buffer += COMMANDS[word]
-
-    def _translate_characters(self, word):
-        # split word into the 2 bytes
-        byte1 = word[:2]
-        byte2 = word[2:]
-
-        # check to see if the the bytes are recognized characters
-        if byte1 not in CHARACTERS or byte2 not in CHARACTERS:
-            return
-
-        # if so, add to buffer
-        if self.paint_on:
-            self.paint_buffer += CHARACTERS[byte1] + CHARACTERS[byte2]
-        else:
-            self.pop_buffer += CHARACTERS[byte1] + CHARACTERS[byte2]
 
     # convert SCC timestamp into total microseconds
     def _translate_time(self, stamp):
